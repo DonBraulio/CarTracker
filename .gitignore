@@ -1,0 +1,4 @@
+inputs/
+outputs/
+__pycache__/
+*.weights
