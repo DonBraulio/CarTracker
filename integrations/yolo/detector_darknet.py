@@ -1,13 +1,12 @@
 import os
 import cv2
 import numpy as np
-from norfair.tracker import Detection
 
 
 class DetectorDarknet:
     """ Adaptor for the original Yolo implementation (AlexeyAB/darknet) """
 
-    def __init__(self, config):
+    def __init__(self, config, fn_tracking_convert=None):
         # Env var used in python wrapper to load .so library
         os.environ["DARKNET_PATH"] = config["darknet_path"]
         from integrations.yolo import darknet  # noqa
@@ -29,23 +28,18 @@ class DetectorDarknet:
         self.height = darknet.network_height(self.network)
         self.darknet_image = darknet.make_image(self.width, self.height, 3)
 
-    def _yolo_to_bbox(self, detection_yolo):
-        x, y, w, h = detection_yolo  # Yolo output: x_center, y_center, width, height
-        x_left, x_right = x - w / 2, x + w / 2
-        y_top, y_bottom = y - h / 2, y + h / 2
-        return ((int(x_left), int(y_top)), (int(x_right), int(y_bottom)))
-
     def detect(self, frame, rescale_detections=True, recolor=False, min_size=16, blacklist=None):
         orig_height, orig_width = frame.shape[:2]
         frame = cv2.resize(frame, (self.width, self.height), interpolation=cv2.INTER_LINEAR)
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         self.darknet.copy_image_from_bytes(self.darknet_image, frame.tobytes())
-        detections = self.darknet.detect_image(
+        detections = self.darknet.detect_image_combine_classes(
             self.network,
             self.class_names,
             self.darknet_image,
             thresh=self.detection_threshold,
             nms=self.nms_threshold,
+            combine=[2, 7],  # Combine truck into car (see indices in coco.names)
         )
         w_scale = orig_width / self.width
         h_scale = orig_height / self.height
@@ -61,11 +55,7 @@ class DetectorDarknet:
                 h *= h_scale
             if w < min_size:
                 continue
-            dets.append(
-                Detection(
-                    np.array(self._yolo_to_bbox((xc, yc, w, h))), data={"label": d[0], "p": d[1]},
-                )
-            )
+            dets.append({"detection": (xc, yc, w, h), "label": d[0], "p": d[1]})
         if recolor:
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         return dets, frame

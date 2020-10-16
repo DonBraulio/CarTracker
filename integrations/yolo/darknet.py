@@ -178,6 +178,27 @@ def detect_image(network, class_names, image, thresh=.5, hier_thresh=.5, nms=.45
     return sorted(predictions, key=lambda x: x[1])
 
 
+def detect_image_combine_classes(network, class_names, image, thresh=.5, hier_thresh=.5, nms=.45, combine=None):
+    """
+        Returns a list with highest confidence class and their bbox
+    """
+    pnum = pointer(c_int(0))
+    predict_image(network, image)
+    detections = get_network_boxes(network, image.w, image.h,
+                                   thresh, hier_thresh, None, 0, pnum, 0)
+    num = pnum[0]
+    if combine is not None:
+        for k in range(num):
+            detections[k].prob[combine[0]] = max(detections[k].prob[combine[0]], detections[k].prob[combine[1]])
+            detections[k].prob[combine[1]] = 0.0
+    if nms:
+        do_nms_sort(detections, num, len(class_names), nms)
+    predictions = remove_negatives(detections, class_names, num)
+    predictions = decode_detection(predictions)
+    free_detections(detections, num)
+    return sorted(predictions, key=lambda x: x[1])
+
+
 #  lib = CDLL("/home/pjreddie/documents/darknet/libdarknet.so", RTLD_GLOBAL)
 #  lib = CDLL("libdarknet.so", RTLD_GLOBAL)
 hasGPU = True
