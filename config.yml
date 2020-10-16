@@ -1,16 +1,16 @@
 general:
   output_folder: ./outputs/
   inference_period: 1
-  # input_left: 0
-  # input_top: 0
-  # input_width: 289
-  # input_height: 241
+  left_margin: 0  # 180
+  right_margin: 1
+  top_margin: 1
+  bottom_margin: 1
 
 yolo_generic:
-  detection_threshold: 0.5
-  nms_threshold: 0.5
+  detection_threshold: 0.2
+  nms_threshold: 0.6  # for SD video: use something like 0.1
   distance_threshold: 1
-  min_size: 32
+  min_size: 4
 
 yolo_darknet:  # Config specific to original darknet implementation (detector_darknet.py)
   darknet_path: ../yolo/darknet/  # Path with libdarknet.so
@@ -34,5 +34,5 @@ debug:
   draw_detections: true
   draw_tracking_ids: true
   draw_tracking_debug: false
-  draw_predictions: true
+  draw_predictions: false
   profiler: true

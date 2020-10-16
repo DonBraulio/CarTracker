@@ -17,6 +17,33 @@ from integrations.yolo.detector_darknet import DetectorDarknet
 from integrations.yolo.yolo_adaptor import YoloAdaptor
 
 
+def draw_margins(frame, config):
+    zones = [
+        frame[: config["top_margin"], :],
+        frame[config["top_margin"] : -config["bottom_margin"], : config["left_margin"]],
+    ]
+    # Indexings below don't work with margin = 0
+    if config["bottom_margin"] > 0:
+        zones.append(frame[-config["bottom_margin"] :, :])
+    if config["right_margin"] > 0:
+        zones.append(
+            frame[config["top_margin"] : -config["bottom_margin"], -config["right_margin"] :]
+        )
+    # Darken dividing each pixel by 2
+    for zone in zones:
+        zone[:, :, :] >>= 1
+
+
+def validate_box_position(box, frame, config):
+    """ Discard boxes if some part is out of the scene """
+    return not (
+        box[0][0] < config["left_margin"]  # x1
+        or box[0][1] < config["top_margin"]  # y1
+        or box[1][0] >= frame.shape[1] - config["right_margin"]  # x2
+        or box[1][1] >= frame.shape[0] - config["bottom_margin"]  # y2
+    )
+
+
 # %%
 with open("config.yml", "r") as stream:
     # Not using Loader=yaml.FullLoader since it doesn't work on jetson PyYAML version
@@ -36,7 +63,9 @@ tracker = Tracker(
     distance_function=pose_adaptor.keypoints_distance,
     detection_threshold=pose_adaptor.detection_threshold,
     distance_threshold=pose_adaptor.distance_threshold,
-    point_transience=8,
+    hit_inertia_min=10,
+    hit_inertia_max=80,
+    point_transience=10,
 )
 
 # Video handler (Norfair)
@@ -53,32 +82,36 @@ for k, frame in enumerate(video):
     tick = time.time()
 
     # Filter parts to track, and also keep detected pose tracked_scores for later use
-    detections_tracker, frame_preprocessed = detector.detect(
-        frame,
-        rescale_detections=True,
-        blacklist=[],
-        min_size=config["yolo_generic"]["min_size"],
+    detections_yolo, frame_preprocessed = detector.detect(
+        frame, rescale_detections=True, blacklist=[], min_size=config["yolo_generic"]["min_size"],
     )
+    for d in detections_yolo:
+        pose_adaptor.add_detection_bbox(d)
+    detections_inframe = [
+        d for d in detections_yolo if validate_box_position(d["bbox"], frame, config["general"])
+    ]
     timer_yolo += time.time() - tick
 
     # Tracker update
     tick = time.time()
-    tracked_people = tracker.update(
+    detections_tracker = [pose_adaptor.yolo_to_tracking(d) for d in detections_inframe]
+    tracked_objects = tracker.update(
         detections_tracker, period=config["general"]["inference_period"]
     )
     timer_tracker += time.time() - tick
 
     # Drawing functions
     tick = time.time()
+    draw_margins(frame, config["general"])
     if config["debug"]["draw_detections"]:  # Using yolo detections
         # draw_points(frame, detections_tracker)
-        pose_adaptor.draw_raw_detections(frame, detections_tracker)
+        pose_adaptor.draw_raw_detections(frame, detections_inframe)
     if config["debug"]["draw_predictions"]:
-        draw_tracked_objects(frame, tracked_people, id_size=0)
+        draw_tracked_objects(frame, tracked_objects, id_size=0)
     if config["debug"]["draw_tracking_ids"]:
-        draw_tracked_objects(frame, tracked_people, draw_points=False, id_thickness=1)
+        draw_tracked_objects(frame, tracked_objects, draw_points=False, id_thickness=1)
     if config["debug"]["draw_tracking_debug"]:
-        draw_debug_metrics(frame, tracked_people)
+        draw_debug_metrics(frame, tracked_objects)
 
     video.write(frame)
     timer_drawing += time.time() - tick
